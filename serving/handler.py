@@ -2,6 +2,7 @@ import base64
 import torch
 import torchvision
 
+from fastapi import HTTPException
 from pydantic import BaseModel
 from pathlib import Path
 from typing import Dict
@@ -25,7 +26,7 @@ class Handler(object):
         """
         instantiation deep learning model 
 
-        1. declare weight path
+        1. declare weight path variable
         2. instantiation deep learning model
         3. load weight and
         """
@@ -40,7 +41,7 @@ class Handler(object):
         inference
 
         Args:
-            request (Request): 딥러닝 모델 추론을 위한 입력 데이터
+            request (Request): 딥러닝 모델 추론을 위한 입력 데이터(single image)
 
         Returns:
             (Response): 딥러닝 모델 추론 결과
@@ -55,15 +56,22 @@ class Handler(object):
     @staticmethod
     def _preprocessing(base64image: str) -> torch.Tensor:
         """
-        base64로 encoding된 image를 torch.tensor로 변환
+        base64로 encoding된 single image를 torch.tensor로 변환
 
         Args:
             base64image (str): base64로 encoding된 이미지
 
         Returns:
-            (torch.Tensor)
+            (torch.Tensor): torch tensor 이미지
         """
-        image = Image.open(BytesIO(base64.b64decode(base64image)))
+
+        try:
+            image = Image.open(BytesIO(base64.b64decode(base64image,
+                                                        validate=True)))
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=f"Invalid base64 image string: {e}")
+
         inputs = torchvision.transforms.ToTensor()(image).unsqueeze(0)
 
         return inputs
