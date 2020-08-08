@@ -1,38 +1,77 @@
-import os
-import sys
 import base64
 import torch
 import torchvision
 
+from fastapi import HTTPException
+from pydantic import BaseModel
+from pathlib import Path
 from typing import Dict
 from io import BytesIO
 from PIL import Image
 
-if sys:
-    sys.path.insert(0, os.path.dirname(
-        os.path.abspath(os.path.dirname(__file__))))
-    from src.model.net import MNIST
+from src.model.net import MNIST
+
+
+class Request(BaseModel):
+    base64_image_string: str
+
+
+class Response(BaseModel):
+    prediction: str
 
 
 class Handler(object):
 
     def __init__(self):
-        root_path = os.path.dirname(os.path.abspath(os.path.dirname(__file__)))
-        weight_file = os.path.join(root_path, "serving/mnist_weight.pt")
-        self.model = MNIST()
+        """
+        instantiation deep learning model 
+
+        1. declare weight path variable
+        2. instantiation deep learning model
+        3. load weight and
+        """
+        root_path = Path(".").absolute()
+        weight_file = root_path / "mnist_weight.pt"
+
+        self.model: MNIST = MNIST()
         self.model.load_state_dict(torch.load(weight_file))
 
-    def __call__(self, data: Dict):
-        base64str = data["base64_image"]
+    def __call__(self, request: Request) -> str:
+        """
+        inference
 
-        inputs = self._preprocessing(base64str)
-        pred = self.model.inference(inputs)
+        Args:
+            request (Request): 딥러닝 모델 추론을 위한 입력 데이터(single image)
 
-        return pred
+        Returns:
+            (Response): 딥러닝 모델 추론 결과
+
+        """
+        base64image: str = request.base64_image_string
+        inputs: torch.Tensor = self._preprocessing(base64image)
+        prediction: str = self.model.inference(inputs)
+
+        return Response(prediction=prediction)
 
     @staticmethod
-    def _preprocessing(base64str: str):
-        image = Image.open(BytesIO(base64.b64decode(base64str)))
+    def _preprocessing(base64image: str) -> torch.Tensor:
+        """
+        base64로 encoding된 single image를 torch.tensor로 변환
+
+        Args:
+            base64image (str): base64로 encoding된 이미지
+
+        Returns:
+            (torch.Tensor): torch tensor 이미지
+        """
+
+        try:
+            image = Image.open(BytesIO(base64.b64decode(base64image,
+                                                        validate=True)))
+        except Exception as e:
+            raise HTTPException(status_code=400,
+                                detail=f"Invalid base64 image string: {e}")
+
         inputs = torchvision.transforms.ToTensor()(image).unsqueeze(0)
 
         return inputs
@@ -40,7 +79,7 @@ class Handler(object):
 
 if __name__ == "__main__":
     base64str = "iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAAAAABXZoBIAAAAjklEQVR4nM3OIQrCcBiG8b+MMcyaZIdYWREvYBCxeAdZ2CEUDyEogpgtHmFNkx7AYBNcFhkPnuAxGXzrj+fjC+HfN6KIzDp3aBtOYN8SS04wtDCHt76zhKNixSsz68NTwxIWijvq1GzQcNNwDKtvV3OztOGi4RTmijMeXcUD59gsvlJpGG3YKobeunD84T5n9jYgy+eQ7wAAAABJRU5ErkJggg=="
-    inputs = {"base64_image": base64str}
+    inputs = {"base64_image_string": base64str}
     handler = Handler()
-    pred = handler(inputs)
-    print(pred)
+    predidction = handler(inputs)
+    print(predidction)
