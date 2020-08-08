@@ -21,7 +21,6 @@ class Response(BaseModel):
 
 
 class Handler(object):
-
     def __init__(self):
         """
         instantiation deep learning model 
@@ -30,8 +29,7 @@ class Handler(object):
         2. instantiation deep learning model
         3. load weight and
         """
-        root_path = Path(".").absolute()
-        weight_file = root_path / "mnist_weight.pt"
+        weight_file = Path("serving", "mnist_weight.pt")
 
         self.model: MNIST = MNIST()
         self.model.load_state_dict(torch.load(weight_file))

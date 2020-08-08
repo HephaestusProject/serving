@@ -1,0 +1,84 @@
+name: Build, Publish, and Deploy
+
+on:
+  push:
+    branches:
+    - master
+
+env:
+  ENVIRONMENT: latest
+  USERNAME: dreamgonfly
+  REPOSITORY: serving # repository name must be lowercase, and must match code repository name.
+  DOCKERFILE_PATH: serving-server.Dockerfile
+  IMAGE_NAME: serving-server
+  HELM_RELEASE_NAME: serving
+  REGISTRY: docker.pkg.github.com
+  OWNER: hephaestusproject
+  IMAGE_TAG: ${{ github.sha }}
+  
+jobs:
+  build-publish-deploy:
+    name: Build, Publish, and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Login to Github Package
+      env:
+        PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        docker login ${{ env.REGISTRY }} -u $USERNAME --password $PASSWORD
+
+    - name: Build Image
+      id: build-image
+      run: |
+        docker pull $REGISTRY/$OWNER/$REPOSITORY/$IMAGE_NAME:$ENVIRONMENT || true
+        docker build . --file $DOCKERFILE_PATH --tag $REGISTRY/$OWNER/$REPOSITORY/$IMAGE_NAME:$IMAGE_TAG \
+          --cache-from $REGISTRY/$OWNER/$REPOSITORY/$IMAGE_NAME:$ENVIRONMENT
+        echo "::set-output name=image_name::$REGISTRY/$OWNER/$REPOSITORY/$IMAGE_NAME:$IMAGE_TAG"
+
+    - name: Test Image
+      id: test-image
+      run: |
+        CONTAINER_ID=$(docker run -d --rm --env ENVIRONMENT $REGISTRY/$OWNER/$REPOSITORY/$IMAGE_NAME:$IMAGE_TAG)
+        docker exec $CONTAINER_ID pytest
+
+    - name: Publish
+      run: |
+        docker push $REGISTRY/$OWNER/$REPOSITORY/$IMAGE_NAME:$IMAGE_TAG
+        # For caching
+        docker tag $REGISTRY/$OWNER/$REPOSITORY/$IMAGE_NAME:$IMAGE_TAG $REGISTRY/$OWNER/$REPOSITORY/$IMAGE_NAME:$ENVIRONMENT
+        docker push $REGISTRY/$OWNER/$REPOSITORY/$IMAGE_NAME:$ENVIRONMENT
+
+    - name: Setup gcloud
+      uses: GoogleCloudPlatform/github-actions/setup-gcloud@master
+      with:
+        version: '290.0.1'
+        service_account_key: ${{ secrets.GKE_SA_KEY }}
+        project_id: monthly-deeplearning
+
+    - name: Configure docker to use the gcloud command-line tool as a credential helper for authentication
+      run: |
+        gcloud --quiet auth configure-docker
+    
+    - name: Get the GKE credentials so we can deploy to the cluster
+      env:
+        GKE_CLUSTER: monthly-deeplearning-cluster
+        GKE_ZONE: us-west1-a
+      run: |
+        gcloud container clusters get-credentials "$GKE_CLUSTER" --zone "$GKE_ZONE"
+
+    - name: Install Helm
+      run: |
+        curl https://helm.baltorepo.com/organization/signing.asc | sudo apt-key add -
+        sudo apt-get install apt-transport-https --yes
+        echo "deb https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+        sudo apt-get update
+        sudo apt-get install helm
+
+    - name: Deploy Helm
+      run: |
+        helm upgrade $HELM_RELEASE_NAME ./devops/helm-chart --install --wait --atomic --namespace=$ENVIRONMENT \
+          --set=environment=$ENVIRONMENT --set=image_tag=$IMAGE_TAG --values=configs/helm-chart-values/$ENVIRONMENT.yaml
