@@ -1,6 +1,6 @@
 torch==1.5.0
 torchvision==0.6.0 
 pytorch-lightning==0.8.5
-fastapi==0.60.1
+fastapi==0.65.2
 uvicorn==0.11.8
 pillow
